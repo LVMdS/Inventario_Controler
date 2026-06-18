@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acesso Restrito - Inventário</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-dark d-flex align-items-center justify-content-center" style="height: 100vh;">
+
+    <div class="card p-4 shadow" style="width: 100%; max-width: 400px;">
+        <div class="text-center mb-4">
+            <h3 class="text-primary">Inventário PRO</h3>
+            <p class="text-muted">Acesso restrito à equipe de Infra</p>
+        </div>
+
+        <form id="formLogin">
+            <div class="mb-3">
+                <label class="form-label">Usuário</label>
+                <input type="text" id="usuario" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Senha</label>
+                <input type="password" id="senha" class="form-control" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Entrar no Sistema</button>
+        </form>
+
+        <div id="mensagemErro" class="alert alert-danger mt-3 d-none text-center" role="alert">
+            Usuário ou senha incorretos!
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('formLogin').addEventListener('submit', async (e) => {
+            e.preventDefault(); // Evita recarregar a tela
+
+            // Pega o que o usuário digitou
+            const usuarioDigitado = document.getElementById('usuario').value;
+            const senhaDigitada = document.getElementById('senha').value;
+
+            try {
+                // Envia para o Python conferir
+                const resposta = await fetch('/api/login/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usuario: usuarioDigitado, senha: senhaDigitada })
+                });
+
+                if (resposta.ok) {
+                    const dados = await resposta.json();
+                    
+                    // LÓGICA DE OURO: Salva o "Crachá" (Token) na memória do navegador
+                    localStorage.setItem('token_inventario', dados.token);
+                    
+                    // Redireciona para o painel principal
+                    window.location.href = '/';
+                } else {
+                    // Se o Python devolver erro 401, mostra a mensagem vermelha
+                    document.getElementById('mensagemErro').classList.remove('d-none');
+                }
+            } catch (erro) {
+                console.error("Erro ao tentar logar:", erro);
+            }
+        });
+    </script>
+</body>
+</html>
