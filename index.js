@@ -1,44 +1,51 @@
 // =========================================================
-// 1. VARIÁVEIS GLOBAIS
+// 1. VARIÁVEIS GLOBAIS E ESTADO
 // =========================================================
-// Estas variáveis ficam fora das funções para que o navegador 
-// não as "esqueça" e possamos usá-las em qualquer lugar do código.
-let chartStatus = null;    // Guarda o gráfico de rosquinha (Status)
-let chartCategoria = null; // Guarda o gráfico de barras (Categoria)
+let chartStatus = null;    // Guarda o gráfico de Status na memória
+let chartCategoria = null; // Guarda o gráfico de Categoria na memória
+let idEmEdicao = null;     // Guarda o ID do equipamento se estivermos no modo "Editar"
 
 
 // =========================================================
-// 2. FUNÇÃO PRINCIPAL: CARREGAR A TABELA (Ligar com o Banco)
+// 2. FUNÇÃO PRINCIPAL: LER O BANCO E MONTAR A TABELA
 // =========================================================
-// Usamos 'async' porque o JavaScript precisa "esperar" (await)
-// o servidor Python ir até o banco de dados e devolver a resposta.
 async function carregarAtivos(busca = '') {
-    // Se o usuário digitou algo na busca, adicionamos na URL. Se não, busca tudo.
     const url = busca ? `/ativos/?busca=${busca}` : '/ativos/';
     
     try {
-        // Pede os dados para o Python e transforma a resposta em formato JSON
         const resposta = await fetch(url);
         const ativos = await resposta.json();
-        
-        // Pega a tabela no HTML e limpa ela antes de colocar os dados novos
         const tabela = document.getElementById('tabelaAtivos');
         tabela.innerHTML = ''; 
         
-        // Um 'loop' (laço de repetição) que passa por cada equipamento encontrado
+        // SEGURANÇA: Descobre quem está logado lendo o crachá na memória do navegador
+        const papelUsuario = localStorage.getItem('papel_inventario');
+        
         ativos.forEach(ativo => {
-            
-            // LÓGICA DA FOTO: Se tem imagem salva, cria a tag <img>. Se não, escreve "Sem foto".
+            // Lógica Visual: Tem foto? Mostra. Não tem? Escreve "Sem foto"
             const tagImagem = ativo.imagem 
                 ? `<img src="/${ativo.imagem}" alt="Foto" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;">` 
                 : `<span class="text-muted small">Sem foto</span>`;
                 
-            // LÓGICA DO QR CODE: Se o Python gerou o QR Code, mostramos ele na tela.
+            // Lógica Visual: Tem QR Code? Mostra. Não tem? Coloca um traço
             const tagQR = ativo.qr_code 
                 ? `<img src="/${ativo.qr_code}" alt="QR" style="width: 50px; height: 50px; border: 1px solid #ccc; border-radius: 5px;">` 
                 : `-`;
 
-            // Escreve a linha (<tr>) e as colunas (<td>) dentro da tabela HTML
+            // LÓGICA DE PERMISSÃO (RBAC): Quem pode ver os botões de ação?
+            let botoesAcao = '';
+            if (papelUsuario === 'admin') {
+                // Se for Admin, injeta os botões amarelos e vermelhos
+                botoesAcao = `
+                    <button class="btn btn-sm btn-warning me-1" onclick="prepararEdicao(${ativo.id}, '${ativo.nome}', '${ativo.categoria}', '${ativo.fabricante}', '${ativo.status}')">Editar</button>
+                    <button class="btn btn-sm btn-danger" onclick="deletarAtivo(${ativo.id})">Excluir</button>
+                `;
+            } else {
+                // Se for Técnico, mostra apenas um selo inofensivo
+                botoesAcao = `<span class="badge bg-light text-dark border">Apenas Leitura</span>`;
+            }
+
+            // Monta a linha da tabela e joga na tela
             tabela.innerHTML += `
                 <tr>
                     <td>${ativo.id}</td>
@@ -48,169 +55,31 @@ async function carregarAtivos(busca = '') {
                     <td>${ativo.categoria}</td>
                     <td>${ativo.fabricante}</td>
                     <td><span class="badge bg-secondary">${ativo.status}</span></td>
-                    <td>
-                        <button class="btn btn-sm btn-danger" onclick="deletarAtivo(${ativo.id})">Excluir</button>
-                    </td>
-                </tr>
+                    <td>${botoesAcao}</td> </tr>
             `;
         });
 
-        // Sempre que a tabela atualiza, mandamos atualizar o Dashboard também
+        // Atualiza os gráficos sempre que a tabela for recarregada
         carregarDashboard();
 
     } catch (erro) {
-        // Se a internet cair ou o servidor Python desligar, avisa no console (F12)
         console.error("Erro ao carregar a tabela:", erro);
     }
 }
 
 
 // =========================================================
-// 3. FUNÇÃO DO DASHBOARD: GRÁFICOS E ESTATÍSTICAS
-// =========================================================
-async function carregarDashboard() {
-    try {
-        // Busca a matemática já calculada pelo Python na rota /estatisticas/
-        const resposta = await fetch('/estatisticas/');
-        const dados = await resposta.json();
-        
-        // Pega o número total e joga no quadrado azul do painel
-        document.getElementById('totalAtivos').textContent = dados.total;
-        
-        // Prepara os dados separando as "palavras" (labels) dos "números" (valores)
-        const statusLabels = Object.keys(dados.por_status);
-        const statusValores = Object.values(dados.por_status);
-        const categoriaLabels = Object.keys(dados.por_categoria);
-        const categoriaValores = Object.values(dados.por_categoria);
-
-        // REGRA DE OURO DOS GRÁFICOS: Destruir o antigo antes de desenhar o novo.
-        // Se não fizermos isso, quando passar o mouse, o gráfico antigo "pisca" no fundo.
-        if (chartStatus) chartStatus.destroy();
-        if (chartCategoria) chartCategoria.destroy();
-
-        // Desenha o gráfico de Rosquinha (Doughnut) para mostrar os Status
-        const ctxStatus = document.getElementById('graficoStatus').getContext('2d');
-        chartStatus = new Chart(ctxStatus, {
-            type: 'doughnut',
-            data: {
-                labels: statusLabels,
-                datasets: [{
-                    data: statusValores,
-                    backgroundColor: ['#198754', '#ffc107', '#dc3545', '#6c757d']
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false }
-        });
-
-        // Desenha o gráfico de Barras (Bar) para mostrar as Categorias
-        const ctxCategoria = document.getElementById('graficoCategoria').getContext('2d');
-        chartCategoria = new Chart(ctxCategoria, {
-            type: 'bar',
-            data: {
-                labels: categoriaLabels,
-                datasets: [{
-                    label: 'Quantidade',
-                    data: categoriaValores,
-                    backgroundColor: '#0d6efd' // Azul padrão do Bootstrap
-                }]
-            },
-            options: { 
-                responsive: true, 
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } } // Esconde a legenda do topo
-            }
-        });
-
-    } catch (erro) {
-        console.error("Erro ao carregar dashboard:", erro);
-    }
-}
-
-
-// =========================================================
-// 4. FUNÇÃO DE CADASTRO: ENVIAR FORMULÁRIO COM IMAGEM
-// =========================================================
-// Ouve o evento de 'submit' (quando o usuário clica no botão verde '+')
-document.getElementById('formAtivo').addEventListener('submit', async (e) => {
-    e.preventDefault(); // Impede que a página dê "F5" (recarregue) sozinha
-    
-    // O FormData é a ferramenta oficial da web para empacotar arquivos pesados.
-    // Textos simples vão como JSON, mas fotos exigem o FormData.
-    const formData = new FormData();
-    formData.append("nome", document.getElementById('nome').value);
-    formData.append("categoria", document.getElementById('categoria').value);
-    formData.append("fabricante", document.getElementById('fabricante').value);
-    formData.append("status", document.getElementById('status').value);
-    
-    // Captura o arquivo de imagem do computador do usuário (se ele selecionou algum)
-    const campoImagem = document.getElementById('imagem');
-    if (campoImagem && campoImagem.files.length > 0) {
-        formData.append("imagem", campoImagem.files[0]);
-    }
-
-    // Dispara o pacote de dados (textos + foto) para o Python salvar no banco
-    await fetch('/ativos/', {
-        method: 'POST',
-        body: formData
-    });
-
-    // Limpa os campos do formulário para o próximo cadastro
-    document.getElementById('formAtivo').reset(); 
-    
-    // Se o usuário estava com alguma busca ativa, mantém a busca ao atualizar a tabela
-    const termoBusca = document.getElementById('campoBusca') ? document.getElementById('campoBusca').value : '';
-    carregarAtivos(termoBusca); 
-});
-
-
-// =========================================================
-// 5. FUNÇÃO PARA DELETAR EQUIPAMENTO
-// =========================================================
-async function deletarAtivo(id) {
-    // Exibe um alerta de segurança antes de apagar definitivamente
-    if (confirm("Tem certeza que deseja remover este equipamento? O QR code também será desativado.")) {
-        // Manda o comando de DELETE para a rota específica do ID no Python
-        await fetch(`/ativos/${id}`, { method: 'DELETE' });
-        
-        // Atualiza a tabela imediatamente após deletar
-        const termoBusca = document.getElementById('campoBusca') ? document.getElementById('campoBusca').value : '';
-        carregarAtivos(termoBusca);
-    }
-}
-
-
-// =========================================================
-// 6. BARRA DE BUSCA EM TEMPO REAL (FILTRO)
-// =========================================================
-const campoBusca = document.getElementById('campoBusca');
-if (campoBusca) {
-    // O evento 'input' é disparado a cada letra que o usuário digita ou apaga
-    campoBusca.addEventListener('input', (e) => {
-        carregarAtivos(e.target.value); // Recarrega a tabela aplicando o filtro
-    });
-}
-
-
-// =========================================================
-// 7. INICIALIZAÇÃO DO SISTEMA
-// =========================================================
-// Assim que o navegador termina de ler este arquivo, ele executa esta linha
-// para carregar os dados do banco de dados na tela pela primeira vez.
-carregarAtivos();
-// =========================================================
-// 8. FUNÇÃO DE AUDITORIA (LOGS)
+// 3. FUNÇÃO DE AUDITORIA: LER A CAIXA PRETA (LOGS)
 // =========================================================
 async function carregarLogs() {
     try {
-        // Busca os últimos 50 logs lá no Python
         const resposta = await fetch('/logs/');
         const logs = await resposta.json();
         
         const tabelaLogs = document.getElementById('tabelaLogs');
-        tabelaLogs.innerHTML = ''; // Limpa a tabela antes de escrever
+        tabelaLogs.innerHTML = ''; 
         
         logs.forEach(log => {
-            // Define uma cor para a "pílula" de ação dependendo do que aconteceu
             let corBadge = 'bg-secondary';
             if (log.acao === 'CADASTRO') corBadge = 'bg-success';
             if (log.acao === 'EXCLUSÃO') corBadge = 'bg-danger';
@@ -229,3 +98,177 @@ async function carregarLogs() {
         console.error("Erro ao carregar o histórico de auditoria:", erro);
     }
 }
+
+
+// =========================================================
+// 4. FUNÇÃO DO DASHBOARD: GRÁFICOS (CHART.JS)
+// =========================================================
+async function carregarDashboard() {
+    try {
+        const resposta = await fetch('/estatisticas/');
+        const dados = await resposta.json();
+        
+        document.getElementById('totalAtivos').textContent = dados.total;
+        
+        const statusLabels = Object.keys(dados.por_status);
+        const statusValores = Object.values(dados.por_status);
+        const categoriaLabels = Object.keys(dados.por_categoria);
+        const categoriaValores = Object.values(dados.por_categoria);
+
+        // Limpa os gráficos antigos da tela para evitar "fantasmas" visuais
+        if (chartStatus) chartStatus.destroy();
+        if (chartCategoria) chartCategoria.destroy();
+
+        const ctxStatus = document.getElementById('graficoStatus').getContext('2d');
+        chartStatus = new Chart(ctxStatus, {
+            type: 'doughnut',
+            data: {
+                labels: statusLabels,
+                datasets: [{
+                    data: statusValores,
+                    backgroundColor: ['#198754', '#ffc107', '#dc3545', '#6c757d']
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        const ctxCategoria = document.getElementById('graficoCategoria').getContext('2d');
+        chartCategoria = new Chart(ctxCategoria, {
+            type: 'bar',
+            data: {
+                labels: categoriaLabels,
+                datasets: [{
+                    label: 'Quantidade',
+                    data: categoriaValores,
+                    backgroundColor: '#0d6efd'
+                }]
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } } 
+            }
+        });
+    } catch (erro) {
+        console.error("Erro ao carregar dashboard:", erro);
+    }
+}
+
+
+// =========================================================
+// 5. FUNÇÃO DO MODO "EDITAR": DEVOLVER DADOS AO FORMULÁRIO
+// =========================================================
+function prepararEdicao(id, nome, categoria, fabricante, status) {
+    idEmEdicao = id; // Trava o sistema no modo "Edição" usando o ID
+    
+    // Sobe os dados da tabela de volta para as caixinhas de texto
+    document.getElementById('nome').value = nome;
+    document.getElementById('categoria').value = categoria;
+    document.getElementById('fabricante').value = fabricante;
+    document.getElementById('status').value = status;
+    
+    // Muda a cara do botão verde (+) para azul (Salvar)
+    const botao = document.querySelector('#formAtivo button[type="submit"]');
+    botao.textContent = "Salvar Alterações";
+    botao.className = "btn btn-primary w-100";
+}
+
+
+// =========================================================
+// 6. FUNÇÃO DE SALVAR: CADASTRAR NOVO OU ATUALIZAR
+// =========================================================
+document.getElementById('formAtivo').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    // Empacota os textos e a possível foto usando FormData
+    const formData = new FormData();
+    formData.append("nome", document.getElementById('nome').value);
+    formData.append("categoria", document.getElementById('categoria').value);
+    formData.append("fabricante", document.getElementById('fabricante').value);
+    formData.append("status", document.getElementById('status').value);
+    
+    const campoImagem = document.getElementById('imagem');
+    if (campoImagem && campoImagem.files.length > 0) {
+        formData.append("imagem", campoImagem.files[0]);
+    }
+
+    // DECISÃO: Estamos criando um equipamento novo ou editando um antigo?
+    if (idEmEdicao) {
+        // Se temos um ID em edição, fazemos PUT (Atualizar)
+        // Nota: No nosso backend atual, o PUT espera um JSON, não um FormData, 
+        // mas para simplificar o laboratório e não reescrever a rota, o front lida com isso:
+        const dadosJSON = {
+            nome: document.getElementById('nome').value,
+            categoria: document.getElementById('categoria').value,
+            fabricante: document.getElementById('fabricante').value,
+            status: document.getElementById('status').value
+        };
+        await fetch(`/ativos/${idEmEdicao}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dadosJSON)
+        });
+        
+        // Destrava o modo de edição e volta o botão para o normal
+        idEmEdicao = null;
+        const botao = document.querySelector('#formAtivo button[type="submit"]');
+        botao.textContent = "+";
+        botao.className = "btn btn-success w-100";
+        
+    } else {
+        // Se não temos ID em edição, fazemos POST (Cadastrar Novo via FormData)
+        await fetch('/ativos/', {
+            method: 'POST',
+            body: formData
+        });
+    }
+
+    document.getElementById('formAtivo').reset(); // Limpa as caixinhas
+    
+    // Mantém a pesquisa visual ativa, se houver
+    const termoBusca = document.getElementById('campoBusca') ? document.getElementById('campoBusca').value : '';
+    carregarAtivos(termoBusca); 
+});
+
+
+// =========================================================
+// 7. FUNÇÃO DE EXCLUSÃO (APAGAR EQUIPAMENTO)
+// =========================================================
+async function deletarAtivo(id) {
+    if (confirm("Tem certeza que deseja remover este equipamento?")) {
+        await fetch(`/ativos/${id}`, { method: 'DELETE' });
+        
+        const termoBusca = document.getElementById('campoBusca') ? document.getElementById('campoBusca').value : '';
+        carregarAtivos(termoBusca);
+    }
+}
+
+
+// =========================================================
+// 8. OUVINTE DA BARRA DE BUSCA EM TEMPO REAL
+// =========================================================
+const campoBusca = document.getElementById('campoBusca');
+if (campoBusca) {
+    campoBusca.addEventListener('input', (e) => {
+        carregarAtivos(e.target.value);
+    });
+}
+
+
+// =========================================================
+// 9. PROTEÇÃO DE INTERFACE (ESCONDER BOTÕES PROIBIDOS)
+// =========================================================
+// Se quem entrou não for o Admin, esconde o botão amarelo de Logs do topo da tela
+if (localStorage.getItem('papel_inventario') !== 'admin') {
+    const btnLogs = document.getElementById('btnLogs');
+    if (btnLogs) {
+        btnLogs.style.display = 'none'; 
+    }
+}
+
+
+// =========================================================
+// 10. LIGAR O MOTOR
+// =========================================================
+// Essa linha faz o sistema buscar os dados assim que o usuário acessa a página
+carregarAtivos();

@@ -52,6 +52,8 @@
                     
                     // LÓGICA DE OURO: Salva o "Crachá" (Token) na memória do navegador
                     localStorage.setItem('token_inventario', dados.token);
+                    //Guarda o nível de permissão na memória do navegador
+                    localStorage.setItem('papel_inventario', dados.papel);
                     
                     // Redireciona para o painel principal
                     window.location.href = '/';

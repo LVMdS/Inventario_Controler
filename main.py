@@ -9,7 +9,7 @@ import io
 import os
 import shutil
 import qrcode
-from datetime import datetime # <- NOVA FERRAMENTA: Para pegar a data e hora do sistema
+from datetime import datetime
 
 app = FastAPI()
 
@@ -21,27 +21,38 @@ conexao = sqlite3.connect("inventario.db", check_same_thread=False)
 cursor = conexao.cursor()
 
 # ---------------------------------------------------------
-# 1. TABELAS DO BANCO DE DADOS
+# 1. TABELA DE USUÁRIOS (Corrigida com o Commit)
 # ---------------------------------------------------------
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     usuario TEXT UNIQUE,
-    senha TEXT
+    senha TEXT,
+    papel TEXT 
 )
 """)
+
 cursor.execute("SELECT COUNT(id) FROM usuarios")
 if cursor.fetchone()[0] == 0:
-    cursor.execute("INSERT INTO usuarios (usuario, senha) VALUES ('admin', 'admin123')")
+    cursor.execute("INSERT INTO usuarios (usuario, senha, papel) VALUES ('admin', 'admin123', 'admin')")
+    cursor.execute("INSERT INTO usuarios (usuario, senha, papel) VALUES ('tecnico', 'tecnico123', 'tecnico')")
+# AQUI ESTÁ A LINHA QUE FALTAVA PARA SALVAR OS USUÁRIOS:
+conexao.commit() 
 
+# ---------------------------------------------------------
+# 2. TABELA DE ATIVOS
+# ---------------------------------------------------------
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS ativos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT, categoria TEXT, fabricante TEXT, status TEXT, imagem TEXT, qr_code TEXT 
 )
 """)
+conexao.commit()
 
-# NOVO: Tabela de Logs (A Caixa Preta)
+# ---------------------------------------------------------
+# 3. TABELA DE LOGS (Auditoria)
+# ---------------------------------------------------------
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,17 +63,14 @@ CREATE TABLE IF NOT EXISTS logs (
 """)
 conexao.commit()
 
-# ---------------------------------------------------------
-# 2. FUNÇÃO ESPIÃ (Registra tudo o que acontece)
-# ---------------------------------------------------------
 def registrar_log(acao: str, detalhes: str):
-    # Pega a data e hora de agora no formato Brasileiro
     agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     cursor.execute("INSERT INTO logs (data_hora, acao, detalhes) VALUES (?, ?, ?)", (agora, acao, detalhes))
     conexao.commit()
 
+
 # ---------------------------------------------------------
-# 3. ROTAS DO SISTEMA (Agora com a função espiã)
+# ROTAS DO SISTEMA
 # ---------------------------------------------------------
 @app.get("/login")
 def tela_login():
@@ -74,11 +82,12 @@ class DadosLogin(BaseModel):
 
 @app.post("/api/login/")
 def fazer_login(dados: DadosLogin):
-    cursor.execute("SELECT id FROM usuarios WHERE usuario = ? AND senha = ?", (dados.usuario, dados.senha))
-    if cursor.fetchone():
-        # Registra no log que alguém entrou no sistema
+    cursor.execute("SELECT id, papel FROM usuarios WHERE usuario = ? AND senha = ?", (dados.usuario, dados.senha))
+    usuario_valido = cursor.fetchone()
+    
+    if usuario_valido:
         registrar_log("LOGIN", f"Usuário '{dados.usuario}' acessou o sistema.")
-        return {"mensagem": "Acesso Liberado", "token": "chave_mestra_secreta"}
+        return {"mensagem": "Acesso Liberado", "token": "chave_mestra_secreta", "papel": usuario_valido[1]}
     else:
         raise HTTPException(status_code=401, detail="Usuário ou senha incorretos")
 
@@ -105,7 +114,6 @@ def cadastrar_ativo(nome: str = Form(...), categoria: str = Form(...), fabricant
     cursor.execute("UPDATE ativos SET qr_code = ? WHERE id = ?", (caminho_qr, id_gerado))
     conexao.commit()
     
-    # Registra o cadastro no Log
     registrar_log("CADASTRO", f"Equipamento '{nome}' (ID: {id_gerado}) adicionado.")
     return {"mensagem": "Equipamento cadastrado com QR Code!"}
 
@@ -115,15 +123,10 @@ class AtivoAtualizado(BaseModel):
     fabricante: str
     status: str
 
-# ROTA RECUPERADA: Editar equipamento
 @app.put("/ativos/{ativo_id}")
 def atualizar_ativo(ativo_id: int, ativo: AtivoAtualizado):
-    cursor.execute(
-        "UPDATE ativos SET nome = ?, categoria = ?, fabricante = ?, status = ? WHERE id = ?",
-        (ativo.nome, ativo.categoria, ativo.fabricante, ativo.status, ativo_id)
-    )
+    cursor.execute("UPDATE ativos SET nome = ?, categoria = ?, fabricante = ?, status = ? WHERE id = ?", (ativo.nome, ativo.categoria, ativo.fabricante, ativo.status, ativo_id))
     conexao.commit()
-    # Registra a edição no Log
     registrar_log("EDIÇÃO", f"Equipamento ID {ativo_id} modificado para Status: {ativo.status}.")
     return {"mensagem": "Equipamento atualizado!"}
 
@@ -140,24 +143,17 @@ def listar_ativos(busca: Optional[str] = None):
 
 @app.delete("/ativos/{ativo_id}")
 def deletar_ativo(ativo_id: int):
-    # Antes de apagar, busca o nome da máquina para salvar no log
     cursor.execute("SELECT nome FROM ativos WHERE id = ?", (ativo_id,))
     nome = cursor.fetchone()[0]
-    
     cursor.execute("DELETE FROM ativos WHERE id = ?", (ativo_id,))
     conexao.commit()
-    
-    # Registra a exclusão no Log
     registrar_log("EXCLUSÃO", f"Equipamento '{nome}' (ID: {ativo_id}) removido do sistema.")
     return {"mensagem": "Equipamento removido!"}
 
-# NOVO: Rota para buscar os logs e mostrar na tela
 @app.get("/logs/")
 def listar_logs():
-    # ORDER BY id DESC faz os logs mais novos aparecerem no topo da lista
     cursor.execute("SELECT data_hora, acao, detalhes FROM logs ORDER BY id DESC LIMIT 50")
-    resultados = cursor.fetchall()
-    return [{"data_hora": l[0], "acao": l[1], "detalhes": l[2]} for l in resultados]
+    return [{"data_hora": l[0], "acao": l[1], "detalhes": l[2]} for l in cursor.fetchall()]
 
 @app.get("/estatisticas/")
 def obter_estatisticas():
