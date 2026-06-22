@@ -8,8 +8,12 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> 
     
     <script>
-        if (localStorage.getItem("token_inventario") !== "chave_mestra_secreta") {
-            window.location.href = "/login"; // Expulsa para o login se não tiver o token
+        //  Verificação de Acesso
+        const token = localStorage.getItem("token_inventario");
+        const perfil = localStorage.getItem("papel_inventario"); // admin ou tecnico
+
+        if (!token || token !== "chave_mestra_secreta") {
+            window.location.href = "/login"; // Redireciona se não estiver logado
         }
     </script>
 </head>
@@ -20,7 +24,11 @@
         <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4 text-center">
             <h2 class="text-primary mb-3 mb-md-0">Inventário de Equipamentos</h2>
             <div>
-                <button id="btnLogs" class="btn btn-outline-warning me-2 mb-2 mb-md-0" onclick="carregarLogs()" data-bs-toggle="modal" data-bs-target="#modalLogs">📜 Histórico (Logs)</button>
+                <!--  Botões: SOMENTE ADMIN -->
+                <button id="btnLogs" class="btn btn-outline-warning me-2 mb-2 mb-md-0" onclick="carregarLogs()" data-bs-toggle="modal" data-bs-target="#modalLogs" style="display: none;"> Histórico (Logs)</button>
+                
+                <button id="btnUsuarios" class="btn btn-outline-primary me-2 mb-2 mb-md-0" onclick="carregarUsuarios()" data-bs-toggle="modal" data-bs-target="#modalUsuarios" style="display: none;"> Gerenciar Usuários</button>
+
                 <button class="btn btn-outline-danger mb-2 mb-md-0" onclick="fazerLogout()">Sair do Sistema</button>
             </div>
         </div>
@@ -61,7 +69,8 @@
                 <input type="text" id="campoBusca" class="form-control" placeholder="🔍 Buscar equipamento por nome, fabricante ou categoria...">
             </div>
             <div class="col-md-3">
-                <a href="/exportar-csv/" class="btn btn-outline-success w-100">📥 Exportar Planilha</a>
+                <!--  Botão de Exportar: SOMENTE ADMIN -->
+                <a id="btnExportar" href="/exportar-csv/" class="btn btn-outline-success w-100" style="display: none;">📥 Exportar Planilha</a>
             </div>
         </div>
         
@@ -112,13 +121,17 @@
                             </tr>
                         </thead>
                         <tbody id="tabelaAtivos">
-                            </tbody>
+                            <!-- Os dados são preenchidos pelo index.js -->
+                        </tbody>
                     </table>
                 </div>
             </div>
         </div>
 
-    </div> <div class="modal fade" id="modalLogs" tabindex="-1" aria-hidden="true">
+    </div> 
+
+    <!-- MODAL DE LOGS -->
+    <div class="modal fade" id="modalLogs" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header bg-dark text-white">
@@ -136,7 +149,7 @@
                                 </tr>
                             </thead>
                             <tbody id="tabelaLogs">
-                                </tbody>
+                            </tbody>
                         </table>
                     </div>
                 </div>
@@ -144,14 +157,86 @@
         </div>
     </div>
 
+    <!-- MODAL GERENCIAR USUÁRIOS -->
+    <div class="modal fade" id="modalUsuarios" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"> Gerenciamento de Usuários</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+
+                    <!-- Formulário Cadastrar / Editar -->
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h6 class="card-title" id="tituloFormUsuario">Adicionar Novo Usuário</h6>
+                            <form id="formUsuario" class="row g-2">
+                                <input type="hidden" id="usuario_id_edicao" value="">
+                                <div class="col-md-4">
+                                    <input type="text" id="novo_usuario" class="form-control" placeholder="Nome de usuário" required>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="password" id="nova_senha" class="form-control" placeholder="Senha (deixe vazio para manter)">
+                                </div>
+                                <div class="col-md-3">
+                                    <select id="novo_papel" class="form-select">
+                                        <option value="admin">Administrador</option>
+                                        <option value="tecnico" selected>Técnico</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <button type="submit" class="btn btn-success w-100" id="btnSalvarUsuario">Salvar</button>
+                                    <button type="button" class="btn btn-secondary w-100 mt-1" id="btnCancelarEdicao" style="display:none;" onclick="cancelarEdicaoUsuario()">Cancelar</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Tabela de Usuários -->
+                    <h6 class="mb-2">Usuários Cadastrados</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped table-bordered">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Usuário</th>
+                                    <th>Perfil</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabelaUsuarios">
+                                <tr><td colspan="4" class="text-center text-muted">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    
     <script src="/static/index.js"></script>
     
     <script>
+        //  APLICAÇÃO DAS REGRAS DE PERMISSÃO
+        window.onload = function() {
+            if (perfil === "admin") {
+                // Admin vê tudo
+                document.getElementById('btnLogs').style.display = "inline-block";
+                document.getElementById('btnExportar').style.display = "inline-block";
+                document.getElementById('btnUsuarios').style.display = "inline-block";
+            } else if (perfil === "tecnico") {
+                // Técnico não vê logs, não vê exportar, não vê usuários
+                console.log("Acesso: Técnico - Visualização e Cadastro liberados.");
+            }
+        };
+
         function fazerLogout() {
-            localStorage.removeItem("token_inventario"); // Apaga o crachá virtual da memória
-            window.location.href = "/login"; // Joga de volta para a tela de bloqueio
+            localStorage.removeItem("token_inventario"); 
+            localStorage.removeItem("papel_inventario"); // Limpa também o perfil
+            window.location.href = "/login"; 
         }
     </script>
 </body>
